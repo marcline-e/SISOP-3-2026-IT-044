@@ -3,12 +3,17 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <signal.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/msg.h>
 #include <sys/sem.h>
 #include <time.h>
 #include "arena.h"
+
+void save_history(const char *username, const char *opponent,int result, int xp_gained);
+int find_player(const char *username);
+void handle_history_save(char *username, char *opponent, int result, int xp, long client_pid);
 
 int shm_id;
 int msg_id;
@@ -176,7 +181,18 @@ void handle_logout(char *username, long client_pid) {
     int idx = find_player(username);
     if (idx != -1) {
         arena->players[idx].logged_in = 0;
-        arena->players[idx].in_battle = 0;
+        arena->players[idx].in_battle = 0; // ← sudah ada, pastikan ada!
+        
+        // ✅ Kalau player di queue, hapus dari queue juga
+        for (int i = 0; i < arena->queue_size; i++) {
+            if (strcmp(arena->queue[i].username, username) == 0) {
+                for (int j = i; j < arena->queue_size-1; j++) {
+                    arena->queue[j] = arena->queue[j+1];
+                }
+                arena->queue_size--;
+                break;
+            }
+        }
     }
     sem_unlock();
 
@@ -191,9 +207,9 @@ void handle_battle_request(char *username, long client_pid) {
     sem_lock();
 
     int idx = find_player(username);
+
     if (idx == -1) {
-        snprintf(reply.mtext, sizeof(reply.mtext), 
-                 "FAIL:Player not found");
+        snprintf(reply.mtext, sizeof(reply.mtext), "FAIL:Player not found");
         sem_unlock();
         msgsnd(msg_id, &reply, sizeof(reply.mtext), 0);
         return;
@@ -330,7 +346,8 @@ void handle_attack(char *username, int slot, int damage, long client_pid) {
         }
 
         // Simpan history
-        // (nanti kita tambah)
+        save_history(winner, loser,  1, 50); // winner: menang, +50 xp
+        save_history(loser,  winner, 0, 15); // loser:  kalah,  +15 xp
 
         // Tandai tidak in_battle
         arena->players[w_idx].in_battle = 0;
@@ -415,6 +432,18 @@ void handle_signal(int sig) {
     exit(0);
 }
 
+void handle_history_save(char *username, char *opponent, int result, int xp, long client_pid) {
+    MsgBuf reply;
+    reply.mtype = client_pid;
+
+    sem_lock();
+    save_history(username, opponent, result, xp);
+    sem_unlock();
+
+    snprintf(reply.mtext, sizeof(reply.mtext), "OK:History saved");
+    msgsnd(msg_id, &reply, sizeof(reply.mtext), 0);
+}
+
 int main() {
     signal(SIGINT, handle_signal);   
     signal(SIGTERM, handle_signal);  
@@ -455,6 +484,35 @@ int main() {
             handle_attack(arg1, slot, atoi(damage_str), client_pid);
         } else if (strcmp(command, "BATTLE") == 0) {
             handle_battle_request(arg1, client_pid);
+        } else if (strcmp(command, "HISTORY") == 0) {
+            // Format: "HISTORY:username:opponent:result:xp:PID"
+            char opponent[64], result_str[8], xp_str[8];
+            long pid;
+            sscanf(msg.mtext, "%[^:]:%[^:]:%[^:]:%[^:]:%[^:]:%ld",
+                command, arg1, opponent, result_str, xp_str, &pid);
+            handle_history_save(arg1, opponent, 
+                                atoi(result_str), atoi(xp_str), pid);
+
+        } else if (strcmp(command, "CANCEL") == 0) {
+            // Hapus dari matchmaking queue
+            sem_lock();
+            int idx = find_player(arg1);
+            for (int i = 0; i < arena->queue_size; i++) {
+                if (strcmp(arena->queue[i].username, arg1) == 0) {
+                    for (int j = i; j < arena->queue_size-1; j++) {
+                        arena->queue[j] = arena->queue[j+1];
+                    }
+                    arena->queue_size--;
+                    if (idx != -1) arena->players[idx].in_battle = 0;
+                    break;
+                }
+            }
+            sem_unlock();
+
+            MsgBuf reply;
+            reply.mtype = client_pid;
+            snprintf(reply.mtext, sizeof(reply.mtext), "OK:Cancelled");
+            msgsnd(msg_id, &reply, sizeof(reply.mtext), 0);
         }  
     }
 

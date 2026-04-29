@@ -181,6 +181,8 @@ void do_battle(int slot, int am_player1,
 
     disable_raw_mode();
 
+    arena->players[player_idx].in_battle = 0;
+
     // Cek hasil battle
     int my_hp = am_player1 ?
                 arena->battles[slot].hp1 :
@@ -261,6 +263,128 @@ void show_history(int player_idx) {
     }
 
     printf("\nPress any key...\n");
+    getchar();
+}
+
+void do_battle_bot(const char *username, int player_idx) {
+    // Setup "battle slot" lokal untuk bot
+    // Kita pakai slot terakhir yang tidak active
+    int slot = -1;
+    for (int i = 0; i < MAX_PLAYERS/2; i++) {
+        if (!arena->battles[i].active) {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot == -1) {
+        printf("No battle slot available!\n");
+        return;
+    }
+
+    // Setup battle slot
+    arena->battles[slot].active = 1;
+    strncpy(arena->battles[slot].player1, username, 64);
+    strncpy(arena->battles[slot].player2, "Wild Beast", 64);
+
+    // HP player dari formula
+    int my_xp = arena->players[player_idx].xp;
+    arena->battles[slot].hp1 = BASE_HEALTH + (my_xp / 10);
+    arena->battles[slot].hp2 = BASE_HEALTH; // bot HP tetap
+
+    // Bot damage (kreasikan sendiri)
+    int bot_damage = 8;
+    int bot_cooldown = 2; // bot attack tiap 2 detik
+
+    enable_raw_mode();
+
+    time_t last_player_attack = 0;
+    time_t last_bot_attack    = 0;
+
+    while (arena->battles[slot].active) {
+        print_battle_screen(arena, slot, 1, username);
+
+        // Baca input player
+        char c = 0;
+        read(STDIN_FILENO, &c, 1);
+
+        time_t now = time(NULL);
+
+        if (c == 'a') {
+            if (now - last_player_attack >= 1) {
+                last_player_attack = now;
+
+                int weapon_bonus = arena->players[player_idx].weapon_bonus_dmg;
+                int damage = BASE_DAMAGE + (my_xp / 50) + weapon_bonus;
+                arena->battles[slot].hp2 -= damage;
+                if (arena->battles[slot].hp2 < 0)
+                    arena->battles[slot].hp2 = 0;
+            }
+        } else if (c == 'u') {
+            if (arena->players[player_idx].weapon_bonus_dmg > 0) {
+                int weapon_bonus = arena->players[player_idx].weapon_bonus_dmg;
+                int base_dmg = BASE_DAMAGE + (my_xp / 50) + weapon_bonus;
+                arena->battles[slot].hp2 -= base_dmg * 3;
+                if (arena->battles[slot].hp2 < 0)
+                    arena->battles[slot].hp2 = 0;
+            }
+        }
+
+        // Bot attack otomatis
+        if (now - last_bot_attack >= bot_cooldown) {
+            last_bot_attack = now;
+            arena->battles[slot].hp1 -= bot_damage;
+            if (arena->battles[slot].hp1 < 0)
+                arena->battles[slot].hp1 = 0;
+        }
+
+        // Cek apakah battle selesai
+        if (arena->battles[slot].hp1 <= 0 ||
+            arena->battles[slot].hp2 <= 0) {
+            arena->battles[slot].active = 0;
+        }
+
+        usleep(100000);
+    }
+
+    disable_raw_mode();
+
+    // Tentukan hasil
+    int i_won = arena->battles[slot].hp1 > 0;
+
+    // Update stats via orion
+    char msg_text[256];
+    MsgBuf reply;
+    snprintf(msg_text, sizeof(msg_text),
+             "ATTACK:%s:%d:%d:%ld",
+             username, slot,
+             i_won ? arena->battles[slot].hp2 + 1 : 0,
+             my_pid);
+
+    // Langsung update stats lokal karena bot tidak punya akun
+    if (i_won) {
+        arena->players[player_idx].xp   += 50;
+        arena->players[player_idx].gold += 120;
+        printf("\n==== VICTORY ====\n");
+    } else {
+        arena->players[player_idx].xp   += 15;
+        arena->players[player_idx].gold += 30;
+        printf("\n==== DEFEAT ====\n");
+    }
+
+    // Update level
+    if (arena->players[player_idx].xp / 100 >
+        arena->players[player_idx].level - 1) {
+        arena->players[player_idx].level++;
+    }
+
+    // Simpan history bot via orion
+    snprintf(msg_text, sizeof(msg_text),
+             "HISTORY:%s:Wild Beast:%d:%d:%ld",
+             username, i_won, i_won ? 50 : 15, my_pid);
+    send_to_orion(msg_text, &reply);
+
+    printf("Battle ended. Press [ENTER] to continue...\n");
     getchar();
 }
 
@@ -354,34 +478,49 @@ int main() {
         scanf("%d", &choice);
         getchar();
 
-        if (choice == 1) {
-            // Kirim battle request
+        if (choice == 1) {          
+            if (arena->players[player_idx].in_battle) {
+                int still_battling = 0;
+                for (int i = 0; i < MAX_PLAYERS/2; i++) {
+                    if (arena->battles[i].active &&
+                        (strcmp(arena->battles[i].player1, username) == 0 ||
+                        strcmp(arena->battles[i].player2, username) == 0)) {
+                        still_battling = 1;
+                        break;
+                    }
+                }
+                
+                if (!still_battling) {
+                    arena->players[player_idx].in_battle = 0;
+                } else {
+                    printf("You are already in a battle!\n");
+                    sleep(1);
+                    continue;
+                }
+            }
+
+            // Baru kirim battle request
             char msg_text[256];
             MsgBuf reply;
             snprintf(msg_text, sizeof(msg_text),
-                    "BATTLE:%s::%ld", username, my_pid);
+                    "BATTLE:%s:x:%ld", username, my_pid);
             send_to_orion(msg_text, &reply);
 
             if (strncmp(reply.mtext, "WAIT:", 5) == 0) {
-                // Masuk matchmaking
                 printf("Searching for an opponent... (35s)\n");
 
-                // Tunggu sampai dapat lawan atau timeout
                 time_t start = time(NULL);
                 int found = 0;
 
                 while (time(NULL) - start < MATCHMAKING_TIMEOUT) {
-                    // Cek apakah kita sudah di-match
                     MsgBuf check;
-                    if (msgrcv(msg_id, &check, 
-                            sizeof(check.mtext), 
+                    if (msgrcv(msg_id, &check,
+                            sizeof(check.mtext),
                             my_pid, IPC_NOWAIT) >= 0) {
-                        if (strncmp(check.mtext, 
-                                "BATTLE_START:", 13) == 0) {
-                            // Parse info battle
+                        if (strncmp(check.mtext, "BATTLE_START:", 13) == 0) {
                             char opp[64];
                             int slot, hp1, hp2;
-                            sscanf(check.mtext + 13, 
+                            sscanf(check.mtext + 13,
                                 "%[^:]:%d:%d:%d",
                                 opp, &slot, &hp1, &hp2);
 
@@ -389,34 +528,37 @@ int main() {
                                 arena->battles[slot].player1,
                                 username) == 0;
 
-                            do_battle(slot, am_p1, 
-                                    username, player_idx);
+                            do_battle(slot, am_p1, username, player_idx);
                             found = 1;
                             break;
                         }
                     }
-                    printf("\rSearching... [%lds]  ",
-                        time(NULL) - start);
+                    printf("\rSearching for an opponent... [%lds]  ", time(NULL) - start);
                     fflush(stdout);
-                    sleep(1);
+                    usleep(100000);
                 }
 
                 if (!found) {
-                    // Timeout → lawan bot
+                    // Hapus dari queue dulu
+                    char cancel_msg[256];
+                    MsgBuf cancel_reply;
+                    snprintf(cancel_msg, sizeof(cancel_msg),
+                            "CANCEL:%s:x:%ld", username, my_pid);
+                    send_to_orion(cancel_msg, &cancel_reply);
+
                     printf("\nNo opponent found. Fighting a bot!\n");
-                    // (implementasi bot bisa kreasikan sendiri)
+                    sleep(1);
+                    do_battle_bot(username, player_idx);
                 }
 
-            } else if (strncmp(reply.mtext, 
-                            "BATTLE_START:", 13) == 0) {
-                // Langsung dapat lawan
+            } else if (strncmp(reply.mtext, "BATTLE_START:", 13) == 0) {
                 char opp[64];
                 int slot, hp1, hp2;
                 sscanf(reply.mtext + 13, "%[^:]:%d:%d:%d",
                     opp, &slot, &hp1, &hp2);
 
                 int am_p1 = strcmp(
-                    arena->battles[slot].player1, 
+                    arena->battles[slot].player1,
                     username) == 0;
 
                 do_battle(slot, am_p1, username, player_idx);
@@ -432,7 +574,7 @@ int main() {
             char msg_text[256];
             MsgBuf reply;
             snprintf(msg_text, sizeof(msg_text),
-                    "LOGOUT:%s::%ld", username, my_pid);
+                    "LOGOUT:%s:x:%ld", username, my_pid);
             send_to_orion(msg_text, &reply);
             printf("Goodbye, %s!\n", username);
             break;
