@@ -243,22 +243,20 @@ Raw mode memungkinkan pembacaan karakter per karakter langsung dari keyboard tan
 ### Output Soal 1
 
 #### Server Online
-![Server Online](./img/soal1_server_online.png)
-
-#### Client Connect & Registrasi Nama
-![Client Connect](./img/soal1_connect.png)
+![Server Online](./assets/soal1/konek_server.png)
 
 #### Nama Duplikat Ditolak
-![Nama Duplikat](./img/soal1_duplicate.png)
+![Nama Duplikat](./assets/soal1/duplikat.png)
 
 #### Broadcast Chat
-![Broadcast Chat](./img/soal1_chat.png)
+![Client Connect](./assets/soal1/konek_client1.png)
+![Client Connect](./assets/soal1/konek_client2.png)
 
 #### Admin Console (The Knights)
-![Admin Console](./img/soal1_admin.png)
+![Admin Console](./assets/soal1/admin.png)
 
 #### History Log
-![History Log](./img/soal1_log.png)
+![History Log](./assets/soal1/history_log.png)
 
 ---
 
@@ -565,37 +563,38 @@ Loop matchmaking menggunakan `IPC_NOWAIT` agar tidak blocking — setiap 0.1 det
 ### Output Soal 2
 
 #### Orion Ready
-![Orion Ready](./img/soal2_orion_ready.png)
+![Orion Ready](./assets/soal2/orion_ready.png)
 
 #### Eternal — Orion Tidak Jalan
-![Orion Not Found](./img/soal2_orion_not_found.png)
+![Orion Not Found](./assets/soal2/orion_not  .png)
 
 #### Menu Utama (Register/Login)
-![Menu Auth](./img/soal2_menu_auth.png)
+![Menu Auth](./assets/soal2/menu.png)
 
 #### Register Akun Baru
-![Register](./img/soal2_register.png)
+![Register](./assets/soal2/create.png)
 
 #### Login & Profile
-![Login Profile](./img/soal2_login_profile.png)
+![Login Profile](./assets/soal2/login.png)
 
 #### Matchmaking
-![Matchmaking](./img/soal2_matchmaking.png)
+![Matchmaking](./assets/soal2/matchmaking.png)
 
 #### Battle Arena (PvP)
-![Battle PvP](./img/soal2_battle_pvp.png)
+![Battle PvP](./assets/soal2/player.png)
 
 #### Battle Arena (vs Bot)
-![Battle Bot](./img/soal2_battle_bot.png)
+![Battle Bot](./assets/soal2/bot.png)
 
 #### Victory & Defeat
-![Victory Defeat](./img/soal2_result.png)
+![Victory](./assets/soal2/victory.png)
+![Defeat](./assets/soal2/defeat.png)
 
 #### Armory
-![Armory](./img/soal2_armory.png)
+![Armory](./assets/soal2/armory.png)
 
 #### Match History
-![History](./img/soal2_history.png)
+![History](./assets/soal2/history.png)
 
 ---
 
@@ -658,4 +657,4 @@ ipcs -s | grep 0x00009012 | awk '{print $2}' | xargs -r ipcrm -s
 
 ---
 
-*Laporan ini dibuat sebagai bagian dari pengerjaan Praktikum Sistem Operasi 2026 — Modul 3*
+*Laporan ini dibuat sebagai bagian dari pengerjaan Praktikum Sistem Operasi 2026 — Modul 3 dengan bantuan https://claude.ai/share/49145a9e-4b9b-40bd-b74e-1bbc3ca371d7*
